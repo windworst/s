@@ -40,27 +40,23 @@ func checkPrivileges() error {
 }
 
 func (s *Scanner) startSYNScan() {
-	// 检查权限
 	if err := checkPrivileges(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	// 解析IP范围
 	ips, err := utils.ParseIPRange(s.config.StartIP, s.config.EndIP)
 	if err != nil {
 		fmt.Printf("Error parsing IP range: %v\n", err)
 		return
 	}
 
-	// 解析端口范围
 	ports, err := utils.ParsePorts(s.config.Ports)
 	if err != nil {
 		fmt.Printf("Error parsing ports: %v\n", err)
 		return
 	}
 
-	// 创建原始套接字
 	conn, err := net.ListenPacket("ip4:tcp", "0.0.0.0")
 	if err != nil {
 		fmt.Printf("Error creating raw socket: %v\n", err)
@@ -74,94 +70,89 @@ func (s *Scanner) startSYNScan() {
 		return
 	}
 
-	// 创建工作任务通道
-	tasks := make(chan scanTask, len(ips)*len(ports))
-	results := make(chan ScanResult, len(ips)*len(ports))
-
-	// 启动工作协程
-	for i := 0; i < s.config.Threads; i++ {
-		s.workerWg.Add(1)
-		go s.synWorker(rawConn, tasks, results)
-	}
-
-	// 发送扫描任务
+	// 启动接收响应的goroutine
 	go func() {
-		for _, ip := range ips {
-			for _, port := range ports {
-				select {
-				case <-s.stopChan:
-					return
-				case tasks <- scanTask{ip: ip.String(), port: port}:
+		for {
+			select {
+			case <-s.stopChan:
+				return
+			default:
+				response, ip, port, err := s.receiveSYNACK(rawConn, time.Duration(s.config.Timeout)*time.Second)
+				if err == nil && response != nil && (response.Flags&0x12) == 0x12 {
+					result := ScanResult{
+						IP:        ip,
+						Port:      int(port),
+						IsOpen:    true,
+						Timestamp: time.Now(),
+					}
+					s.AddResult(result)
+					fmt.Printf("%s:%d\n", ip, port)
 				}
 			}
 		}
-		close(tasks)
 	}()
 
-	// 启动结果处理
-	var completed int
-	total := len(ips) * len(ports)
+	// 发送SYN包
+	for _, ip := range ips {
+		for _, port := range ports {
+			select {
+			case <-s.stopChan:
+				return
+			default:
+				header := &ipv4.Header{
+					Version:  4,
+					Len:      ipHeaderSize,
+					TOS:      0,
+					TotalLen: ipHeaderSize + tcpHeaderSize,
+					TTL:      64,
+					Protocol: 6,
+					Dst:      net.ParseIP(ip.String()),
+				}
 
-	for result := range results {
-		completed++
-		if result.IsOpen {
-			s.AddResult(result)
-			fmt.Printf("%s:%d\n", result.IP, result.Port)
-		}
+				tcpHeader := &TCPHeader{
+					SrcPort:    uint16(1024 + (time.Now().UnixNano() % 64511)),
+					DstPort:    uint16(port),
+					SeqNum:     uint32(time.Now().UnixNano()),
+					DataOffset: 5,
+					Flags:      0x02,
+					Window:     64240,
+				}
 
-		if completed == total {
-			close(results)
-			break
+				s.sendSYNPacket(rawConn, header, tcpHeader)
+			}
 		}
 	}
+
+	// 等待最后的响应
+	time.Sleep(time.Duration(s.config.Timeout) * time.Second)
 }
 
-func (s *Scanner) synWorker(conn *ipv4.RawConn, tasks <-chan scanTask, results chan<- ScanResult) {
-	defer s.workerWg.Done()
-
-	for task := range tasks {
-		select {
-		case <-s.stopChan:
-			return
-		default:
-			result := ScanResult{
-				IP:        task.ip,
-				Port:      task.port,
-				IsOpen:    false,
-				Timestamp: time.Now(),
-			}
-
-			// 构造SYN包
-			header := &ipv4.Header{
-				Version:  4,
-				Len:      ipHeaderSize,
-				TOS:      0,
-				TotalLen: ipHeaderSize + tcpHeaderSize,
-				TTL:      64,
-				Protocol: 6, // TCP
-				Dst:      net.ParseIP(task.ip),
-			}
-
-			// 构造TCP头
-			tcpHeader := &TCPHeader{
-				SrcPort:    uint16(1024 + (time.Now().UnixNano() % 64511)), // 随机源端口
-				DstPort:    uint16(task.port),
-				SeqNum:     uint32(time.Now().UnixNano()),
-				DataOffset: 5,
-				Flags:      0x02, // SYN
-				Window:     64240,
-			}
-
-			// 发送SYN包并等待响应
-			if err := s.sendSYNPacket(conn, header, tcpHeader); err == nil {
-				// 等待响应
-				if response, err := s.receiveSYNACK(conn, tcpHeader.SrcPort, uint16(task.port), time.Duration(s.config.Timeout)*time.Second); err == nil {
-					result.IsOpen = (response.Flags & 0x12) == 0x12 // SYN+ACK
-				}
-			}
-
-			results <- result
+func (s *Scanner) receiveSYNACK(conn *ipv4.RawConn, timeout time.Duration) (*TCPHeader, string, uint16, error) {
+	buf := make([]byte, 1500) // MTU大小
+	for {
+		header, payload, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			return nil, "", 0, err
 		}
+
+		if header == nil || len(payload) < tcpHeaderSize {
+			continue
+		}
+
+		// 解析TCP头部
+		tcpHeader := &TCPHeader{
+			SrcPort:    binary.BigEndian.Uint16(payload[0:2]),
+			DstPort:    binary.BigEndian.Uint16(payload[2:4]),
+			SeqNum:     binary.BigEndian.Uint32(payload[4:8]),
+			AckNum:     binary.BigEndian.Uint32(payload[8:12]),
+			DataOffset: payload[12] >> 4,
+			Flags:      payload[13],
+			Window:     binary.BigEndian.Uint16(payload[14:16]),
+			Checksum:   binary.BigEndian.Uint16(payload[16:18]),
+			UrgPtr:     binary.BigEndian.Uint16(payload[18:20]),
+		}
+
+		return tcpHeader, header.Src.String(), tcpHeader.SrcPort, nil
 	}
 }
 
@@ -242,44 +233,4 @@ func (s *Scanner) sendSYNPacket(conn *ipv4.RawConn, header *ipv4.Header, tcpHead
 
 	// 发送数据包
 	return conn.WriteTo(header, tcpBytes, nil)
-}
-
-func (s *Scanner) receiveSYNACK(conn *ipv4.RawConn, srcPort, dstPort uint16, timeout time.Duration) (*TCPHeader, error) {
-	deadline := time.Now().Add(timeout)
-	conn.SetReadDeadline(deadline)
-
-	buf := make([]byte, 1500) // MTU大小
-	for time.Now().Before(deadline) {
-		header, payload, _, err := conn.ReadFrom(buf)
-		if err != nil {
-			if err, ok := err.(net.Error); ok && err.Timeout() {
-				return nil, fmt.Errorf("timeout waiting for response")
-			}
-			continue
-		}
-
-		if header == nil || len(payload) < tcpHeaderSize {
-			continue
-		}
-
-		// 解析TCP头部
-		tcpHeader := &TCPHeader{
-			SrcPort:    binary.BigEndian.Uint16(payload[0:2]),
-			DstPort:    binary.BigEndian.Uint16(payload[2:4]),
-			SeqNum:     binary.BigEndian.Uint32(payload[4:8]),
-			AckNum:     binary.BigEndian.Uint32(payload[8:12]),
-			DataOffset: payload[12] >> 4,
-			Flags:      payload[13],
-			Window:     binary.BigEndian.Uint16(payload[14:16]),
-			Checksum:   binary.BigEndian.Uint16(payload[16:18]),
-			UrgPtr:     binary.BigEndian.Uint16(payload[18:20]),
-		}
-
-		// 检查是否是我们期望的响应
-		if tcpHeader.DstPort == srcPort && tcpHeader.SrcPort == dstPort {
-			return tcpHeader, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no response received")
 }

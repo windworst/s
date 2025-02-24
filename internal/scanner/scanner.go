@@ -36,6 +36,7 @@ type ScanResult struct {
 	IsOpen    bool
 	Banner    string
 	Timestamp time.Time
+	Error     string // 存储扫描过程中的错误信息
 }
 
 // NewScanner 创建新的扫描器实例
