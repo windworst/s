@@ -31,11 +31,10 @@ func (s *Scanner) startTCPScan() {
 	results := make(chan ScanResult)
 
 	// 启动工作线程池
-	var wg sync.WaitGroup
 	for i := 0; i < s.config.Threads; i++ {
-		wg.Add(1)
+		s.workerWg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer s.workerWg.Done()
 			for task := range tasks {
 				select {
 				case <-s.stopChan:
@@ -105,7 +104,7 @@ func (s *Scanner) startTCPScan() {
 			select {
 			case <-s.stopChan:
 				close(tasks)
-				wg.Wait()
+				s.workerWg.Wait()
 				close(results)
 				resultWg.Wait()
 				return
@@ -119,7 +118,7 @@ func (s *Scanner) startTCPScan() {
 	}
 
 	// 等待所有工作完成
-	wg.Wait()
+	s.workerWg.Wait()
 	close(results)
 	resultWg.Wait()
 

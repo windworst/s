@@ -62,19 +62,21 @@ func (s *Scanner) startSYNScan() {
 
 	conn, err := net.ListenPacket("ip4:tcp", "0.0.0.0")
 	if err != nil {
-		fmt.Printf("Fail To Create Socket\n")
+		fmt.Printf("Fail To Create Listen Socket : %v\n", err)
 		return
 	}
 	defer conn.Close()
 
 	rawConn, err := ipv4.NewRawConn(conn)
 	if err != nil {
-		fmt.Println("Fail To Create Socket")
+		fmt.Printf("Fail To Create Socket : %v\n", err)
 		return
 	}
 
 	// 启动接收响应的goroutine
+	s.workerWg.Add(1)
 	go func() {
+		defer s.workerWg.Done()
 		for {
 			select {
 			case <-s.stopChan:
@@ -143,9 +145,17 @@ func (s *Scanner) startSYNScan() {
 
 func (s *Scanner) receiveSYNACK(conn *ipv4.RawConn, timeout time.Duration) (*TCPHeader, string, uint16, error) {
 	buf := make([]byte, 1500) // MTU大小
+
+	// 设置读取超时
+	deadline := time.Now().Add(timeout)
+	conn.SetReadDeadline(deadline)
+
 	for {
 		header, payload, _, err := conn.ReadFrom(buf)
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return nil, "", 0, err
+			}
 			return nil, "", 0, err
 		}
 

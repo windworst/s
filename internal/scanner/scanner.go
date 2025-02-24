@@ -3,7 +3,6 @@ package scanner
 import (
 	"fmt"
 	"net"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -52,10 +51,6 @@ func NewScanner(config *Config) (*Scanner, error) {
 	}
 	if config.EndIP != "" && net.ParseIP(config.EndIP) == nil {
 		return nil, fmt.Errorf("Invalid Hosts To Scan\n")
-	}
-
-	if config.ScanType == "SYN" && runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("SYN Scan Can Only Perform On WIN 2K Or Above\n")
 	}
 
 	return &Scanner{
