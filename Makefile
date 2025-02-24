@@ -50,4 +50,19 @@ install: build
 uninstall:
 	rm -f /usr/local/bin/$(BINARY_NAME)
 
-.PHONY: all build test clean run deps build-linux build-mac build-mac-arm64 build-windows install uninstall 
+.PHONY: all build test clean run deps build-linux build-mac build-mac-arm64 build-windows install uninstall
+
+ifeq ($(OS),Windows_NT)
+    BINARY=s.exe
+else
+    BINARY=s
+endif
+
+build:
+	$(GOBUILD) -o $(BINARY) $(MAIN_PATH)
+
+clean:
+	$(GOCLEAN)
+	rm -f $(BINARY)
+
+.PHONY: build clean
