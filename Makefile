@@ -9,22 +9,29 @@ BINARY_NAME=s
 BINARY_UNIX=$(BINARY_NAME)
 MAIN_PATH=cmd/scanner/main.go
 
+# 根据操作系统设置二进制文件名
+ifeq ($(OS),Windows_NT)
+    BINARY=$(BINARY_NAME).exe
+else
+    BINARY=$(BINARY_NAME)
+endif
+
 all: test build
 
 build:
-	$(GOBUILD) -o $(BINARY_NAME) $(MAIN_PATH)
+	$(GOBUILD) -o $(BINARY) $(MAIN_PATH)
 
 test:
 	$(GOTEST) -v ./...
 
 clean:
 	$(GOCLEAN)
-	rm -f $(BINARY_NAME)
+	rm -f $(BINARY)
 	rm -f $(BINARY_UNIX)
 
 run:
-	$(GOBUILD) -o $(BINARY_NAME) $(MAIN_PATH)
-	./$(BINARY_NAME)
+	$(GOBUILD) -o $(BINARY) $(MAIN_PATH)
+	./$(BINARY)
 
 deps:
 	$(GOMOD) tidy
@@ -44,25 +51,10 @@ build-windows:
 
 # 安装到系统
 install: build
-	mv $(BINARY_NAME) /usr/local/bin/
+	mv $(BINARY) /usr/local/bin/
 
 # 从系统中卸载
 uninstall:
 	rm -f /usr/local/bin/$(BINARY_NAME)
 
 .PHONY: all build test clean run deps build-linux build-mac build-mac-arm64 build-windows install uninstall
-
-ifeq ($(OS),Windows_NT)
-    BINARY=s.exe
-else
-    BINARY=s
-endif
-
-build:
-	$(GOBUILD) -o $(BINARY) $(MAIN_PATH)
-
-clean:
-	$(GOCLEAN)
-	rm -f $(BINARY)
-
-.PHONY: build clean
