@@ -15,114 +15,123 @@ func (s *Scanner) startTCPScan() {
 	// 解析IP范围
 	ips, err := utils.ParseIPRange(s.config.StartIP, s.config.EndIP)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("Invalid Hosts To Scan\n")
 		return
 	}
 
 	// 解析端口范围
 	ports, err := utils.ParsePorts(s.config.Ports)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("Invalid Port List\n")
 		return
 	}
 
-	// 创建工作任务通道
-	tasks := make(chan scanTask, len(ips)*len(ports))
-	results := make(chan ScanResult, len(ips)*len(ports))
+	// 创建任务通道，只缓存正在处理的任务
+	tasks := make(chan scanTask, s.config.Threads)
+	results := make(chan ScanResult)
 
-	// 启动工作协程
+	// 启动工作线程池
+	var wg sync.WaitGroup
 	for i := 0; i < s.config.Threads; i++ {
-		s.workerWg.Add(1)
-		go s.tcpWorker(tasks, results)
-	}
-
-	// 发送扫描任务
-	go func() {
-		for _, ip := range ips {
-			for _, port := range ports {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range tasks {
 				select {
 				case <-s.stopChan:
 					return
-				case tasks <- scanTask{ip: ip.String(), port: port}:
+				default:
+					result := ScanResult{
+						IP:        task.ip,
+						Port:      task.port,
+						IsOpen:    false,
+						Timestamp: time.Now(),
+					}
+
+					// 尝试建立TCP连接
+					addr := fmt.Sprintf("%s:%d", task.ip, task.port)
+					conn, err := net.DialTimeout("tcp", addr, time.Duration(s.config.Timeout)*time.Second)
+
+					if err == nil {
+						result.IsOpen = true
+
+						// 获取Banner
+						if s.config.GetBanner {
+							if s.config.HTTPBanner && (task.port == 80 || task.port == 443) {
+								result.Banner = s.getHTTPBanner(conn)
+							} else {
+								result.Banner = s.getBanner(conn)
+							}
+						}
+
+						conn.Close()
+					}
+
+					select {
+					case <-s.stopChan:
+						return
+					case results <- result:
+					}
 				}
 			}
-		}
-		close(tasks)
-	}()
+		}()
+	}
 
-	// 启动结果处理协程
+	// 启动结果处理
+	var completed int
 	var resultWg sync.WaitGroup
 	resultWg.Add(1)
-
 	go func() {
 		defer resultWg.Done()
 		for result := range results {
 			if result.IsOpen {
 				s.AddResult(result)
 				if result.Banner != "" {
-					fmt.Printf("%s:%d - %s\n", result.IP, result.Port, result.Banner)
+					fmt.Printf("%-16s %-5d -> \"%s\"           \n", result.IP, result.Port, result.Banner)
 				} else {
-					fmt.Printf("%s:%d\n", result.IP, result.Port)
+					fmt.Printf("%-16s %-5d Open             \n", result.IP, result.Port)
 				}
 			}
+			completed++
+			fmt.Printf("%d Ports Scanned.Taking %d Threads \r", completed, s.config.Threads)
 		}
 	}()
 
+	// 分配扫描任务
+	totalTasks := len(ips) * len(ports)
+	taskCount := 0
+	for _, ip := range ips {
+		for _, port := range ports {
+			select {
+			case <-s.stopChan:
+				close(tasks)
+				wg.Wait()
+				close(results)
+				resultWg.Wait()
+				return
+			case tasks <- scanTask{ip: ip.String(), port: port}:
+				taskCount++
+				if taskCount == totalTasks {
+					close(tasks)
+				}
+			}
+		}
+	}
+
 	// 等待所有工作完成
-	s.workerWg.Wait()
+	wg.Wait()
 	close(results)
 	resultWg.Wait()
 
 	// 保存结果
 	if s.config.SaveResults {
-		if err := s.SaveResults(); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
+		s.SaveResults()
 	}
 }
 
 type scanTask struct {
 	ip   string
 	port int
-}
-
-func (s *Scanner) tcpWorker(tasks <-chan scanTask, results chan<- ScanResult) {
-	defer s.workerWg.Done()
-
-	for task := range tasks {
-		select {
-		case <-s.stopChan:
-			return
-		default:
-			result := ScanResult{
-				IP:        task.ip,
-				Port:      task.port,
-				IsOpen:    false,
-				Timestamp: time.Now(),
-			}
-
-			// 尝试建立TCP连接
-			addr := fmt.Sprintf("%s:%d", task.ip, task.port)
-			conn, err := net.DialTimeout("tcp", addr, time.Duration(s.config.Timeout)*time.Second)
-
-			if err == nil {
-				result.IsOpen = true
-
-				// 获取Banner
-				if s.config.GetBanner {
-					if s.config.HTTPBanner && (task.port == 80 || task.port == 443) {
-						result.Banner = s.getHTTPBanner(conn)
-					} else {
-						result.Banner = s.getBanner(conn)
-					}
-				}
-
-				conn.Close()
-			}
-
-			results <- result
-		}
-	}
 }
 
 // getBanner 获取服务Banner

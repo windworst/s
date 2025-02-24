@@ -3,6 +3,7 @@ package scanner
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -41,12 +42,20 @@ type ScanResult struct {
 
 // NewScanner 创建新的扫描器实例
 func NewScanner(config *Config) (*Scanner, error) {
+	if config.ScanType != "TCP" && config.ScanType != "SYN" {
+		return nil, fmt.Errorf("Invalid Scan Type\n")
+	}
+
 	// 验证IP地址格式
 	if net.ParseIP(config.StartIP) == nil {
-		return nil, fmt.Errorf("invalid start IP address: %s", config.StartIP)
+		return nil, fmt.Errorf("Invalid Hosts To Scan\n")
 	}
 	if config.EndIP != "" && net.ParseIP(config.EndIP) == nil {
-		return nil, fmt.Errorf("invalid end IP address: %s", config.EndIP)
+		return nil, fmt.Errorf("Invalid Hosts To Scan\n")
+	}
+
+	if config.ScanType == "SYN" && runtime.GOOS == "windows" {
+		return nil, fmt.Errorf("SYN Scan Can Only Perform On WIN 2K Or Above\n")
 	}
 
 	return &Scanner{
@@ -58,9 +67,13 @@ func NewScanner(config *Config) (*Scanner, error) {
 
 // Start 开始扫描
 func (s *Scanner) Start() {
+	fmt.Printf("TCP Port Scanner V1.2 By WinEggDrop\n\n")
+
 	if s.config.ScanType == "TCP" {
+		fmt.Printf("Normal Scan: About To Scan %s Using %d Threads\n", s.config.StartIP, s.config.Threads)
 		s.startTCPScan()
 	} else {
+		fmt.Printf("SYN Scan: About To Scan %s Using %d Thread\n", s.config.StartIP, s.config.Threads)
 		s.startSYNScan()
 	}
 }

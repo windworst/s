@@ -33,40 +33,43 @@ type TCPHeader struct {
 
 // SYN扫描需要root/管理员权限
 func checkPrivileges() error {
-	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		return fmt.Errorf("SYN scan requires root privileges")
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("SYN Scan Requires Root/Administrator Privileges")
 	}
 	return nil
 }
 
 func (s *Scanner) startSYNScan() {
 	if err := checkPrivileges(); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("%v\n", err)
 		return
 	}
 
 	ips, err := utils.ParseIPRange(s.config.StartIP, s.config.EndIP)
 	if err != nil {
-		fmt.Printf("Error parsing IP range: %v\n", err)
+		fmt.Printf("Invalid Hosts To Scan\n")
 		return
 	}
 
 	ports, err := utils.ParsePorts(s.config.Ports)
 	if err != nil {
-		fmt.Printf("Error parsing ports: %v\n", err)
+		fmt.Printf("Invalid Port List\n")
 		return
 	}
 
 	conn, err := net.ListenPacket("ip4:tcp", "0.0.0.0")
 	if err != nil {
-		fmt.Printf("Error creating raw socket: %v\n", err)
+		fmt.Printf("Fail To Create Socket\n")
 		return
 	}
 	defer conn.Close()
 
 	rawConn, err := ipv4.NewRawConn(conn)
 	if err != nil {
-		fmt.Printf("Error creating raw connection: %v\n", err)
+		fmt.Println("Fail To Create Socket")
 		return
 	}
 
@@ -86,19 +89,26 @@ func (s *Scanner) startSYNScan() {
 						Timestamp: time.Now(),
 					}
 					s.AddResult(result)
-					fmt.Printf("%s:%d\n", ip, port)
+					fmt.Printf("%-16s %-5d Open             \n", ip, port)
 				}
 			}
 		}
 	}()
 
 	// 发送SYN包
+	var scanned int
+	var lastIP string
+	var lastPort int
+
 	for _, ip := range ips {
 		for _, port := range ports {
 			select {
 			case <-s.stopChan:
 				return
 			default:
+				lastIP = ip.String()
+				lastPort = port
+
 				header := &ipv4.Header{
 					Version:  4,
 					Len:      ipHeaderSize,
@@ -119,9 +129,13 @@ func (s *Scanner) startSYNScan() {
 				}
 
 				s.sendSYNPacket(rawConn, header, tcpHeader)
+				scanned++
+				fmt.Printf("%d Ports Scanned.              \r", scanned)
 			}
 		}
 	}
+
+	fmt.Printf("Last Scan: %s:%d                \n", lastIP, lastPort)
 
 	// 等待最后的响应
 	time.Sleep(time.Duration(s.config.Timeout) * time.Second)
@@ -195,7 +209,7 @@ func (s *Scanner) sendSYNPacket(conn *ipv4.RawConn, header *ipv4.Header, tcpHead
 	// 获取本地IP地址
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return fmt.Errorf("failed to get interface addresses: %v", err)
+		return err
 	}
 
 	var srcIP net.IP
@@ -209,7 +223,7 @@ func (s *Scanner) sendSYNPacket(conn *ipv4.RawConn, header *ipv4.Header, tcpHead
 	}
 
 	if srcIP == nil {
-		return fmt.Errorf("no suitable source IP address found")
+		return err
 	}
 
 	// 设置IP头部

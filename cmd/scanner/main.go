@@ -36,7 +36,7 @@ func main() {
 	// 解析基本参数
 	scanType := strings.ToUpper(os.Args[1])
 	if scanType != "TCP" && scanType != "SYN" {
-		fmt.Println("Error: scan type must be TCP or SYN")
+		fmt.Println("Invalid Scan Type")
 		os.Exit(1)
 	}
 
@@ -45,7 +45,7 @@ func main() {
 		ScanType:    scanType,
 		StartIP:     os.Args[2],
 		Ports:       "",
-		Threads:     512, // 默认线程数
+		Threads:     256, // 默认线程数
 		Timeout:     3,   // 默认超时3秒
 		SaveResults: false,
 		GetBanner:   false,
@@ -102,7 +102,7 @@ func main() {
 	// 创建并启动扫描器
 	s, err := scanner.NewScanner(config)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("%s\n", err)
 		os.Exit(1)
 	}
 
