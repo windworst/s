@@ -1,6 +1,6 @@
 # S Scanner
 
-这是一个用 Go 语言重写的 S 端口扫描器，完全复刻了原版 S 扫描器的功能和使用方式。原版 S 扫描器是一个由 Metasploit 团队开发的高效端口扫描工具，以其简洁的输出格式和高效的扫描性能而闻名。
+这是一个用 Go 语言重写的 S 端口扫描器，完全复刻了原版 S 扫描器的功能和使用方式。原版 S 扫描器是由WinEggDrop开发的高效端口扫描工具，以其简洁的输出格式和高效的扫描性能而闻名。
 
 本项目旨在提供一个完全兼容的开源实现，保持了原版扫描器的所有特性：
 - 简洁的命令行界面
@@ -10,133 +10,102 @@
 
 ## 功能特点
 
-- 支持 TCP Connect 扫描和 SYN 扫描
-- 支持多种 IP 格式：单个 IP、IP 范围、CIDR
+- 支持 TCP 连接扫描和 SYN 扫描
+- 多线程并发扫描
+- 支持 IP 范围扫描
 - 支持多种端口格式：单个端口、端口范围、端口列表
-- 支持获取服务 Banner
-- 支持 HTTP 服务器 Banner 识别
-- 支持多线程扫描
-- 支持扫描结果保存
-
-## 编译安装
-
-### 使用 Go 命令
-
-```bash
-git clone <repository_url>
-cd s
-go build -o s cmd/scanner/main.go
-```
-
-### 使用 Makefile（推荐）
-
-项目提供了 Makefile 来简化构建过程：
-
-```bash
-# 构建项目（包含运行测试）
-make
-
-# 仅构建项目
-make build
-
-# 运行测试
-make test
-
-# 更新依赖
-make deps
-
-# 清理构建文件
-make clean
-
-# 安装到系统
-sudo make install
-
-# 从系统中卸载
-sudo make uninstall
-```
-
-#### 交叉编译
-
-```bash
-# 编译 Linux 版本
-make build-linux
-
-# 编译 macOS (Intel) 版本
-make build-mac
-
-# 编译 macOS (Apple Silicon) 版本
-make build-mac-arm64
-
-# 编译 Windows 版本
-make build-windows
-```
+- 可选获取服务 Banner 信息
+- 支持 HTTP 服务的 Server 头信息获取
+- 可将结果保存到文件
 
 ## 使用方法
 
+### 编译
+
 ```bash
+# 编译当前平台
+make build
+
+# 交叉编译
+make build-linux    # Linux平台
+make build-mac      # macOS平台
+make build-windows  # Windows平台
+```
+
+### 命令格式
+
+```
 s TCP/SYN StartIP [EndIP] Ports [Threads] [/T(N)] [/(H)Banner] [/Save]
 ```
 
-### 参数说明
-
-- `TCP/SYN`: 扫描方式（SYN 扫描需要 root/管理员权限）
-- `StartIP`: 起始 IP 地址
-- `EndIP`: 结束 IP 地址（可选）
-- `Ports`: 端口号
-- `Threads`: 线程数（可选，默认 512）
-- `/T(N)`: 超时时间（可选，默认 3 秒）
-- `/Banner`: 获取服务 Banner
-- `/HBanner`: 获取 HTTP 服务器 Banner
-- `/Save`: 保存扫描结果
+参数说明：
+- `TCP/SYN`: 扫描模式
+- `StartIP`: 起始IP地址
+- `EndIP`: 结束IP地址（可选）
+- `Ports`: 端口列表
+- `Threads`: 线程数（默认256）
+- `/T(N)`: 超时时间（秒）
+- `/Banner`: 获取服务Banner
+- `/HBanner`: 获取HTTP服务Banner
+- `/Save`: 保存结果到文件
 
 ### 使用示例
 
-1. TCP 扫描单个 IP 和端口：
 ```bash
-s TCP 192.168.1.1 80
+# TCP扫描单个IP的80端口
+s TCP 12.12.12.12 80 512
+
+# TCP扫描IP范围的多个端口
+s TCP 12.12.12.12 12.12.12.254 80,443,8080 512
+
+# TCP扫描带Banner获取
+s TCP 12.12.12.12 12.12.12.254 80 512 /Banner
+
+# TCP扫描带HTTP Banner获取
+s TCP 12.12.12.12 12.12.12.254 80 512 /HBanner
+
+# SYN扫描（需要root/管理员权限）
+s SYN 12.12.12.12 12.12.12.254 80
+
+# 扫描端口范围
+s TCP 12.12.12.12 1-65535 512
+
+# 指定超时和保存结果
+s TCP 12.12.12.12 80 512 /T8 /Save
+
+# 使用CIDR格式扫描网段
+s TCP 12.12.12.12/24 80 512
 ```
 
-2. TCP 扫描 IP 范围：
-```bash
-s TCP 192.168.1.1 192.168.1.254 80
+### 输出格式
+
+```
+TCP Port Scanner V1.2 By WinEggDrop
+
+Normal Scan: About To Scan 12.12.12.12 Using 512 Threads
+12.12.12.12     80    Open
+12.12.12.12     443   Open
+1000 Ports Scanned.
 ```
 
-3. TCP 扫描 CIDR：
-```bash
-s TCP 192.168.1.0/24 80
+带Banner的输出：
 ```
-
-4. 扫描多个端口：
-```bash
-s TCP 192.168.1.1 80,443,8080
-```
-
-5. 扫描端口范围：
-```bash
-s TCP 192.168.1.1 1-65535
-```
-
-6. 获取服务 Banner：
-```bash
-s TCP 192.168.1.1 80 /BANNER
-```
-
-7. SYN 扫描（需要 root 权限）：
-```bash
-sudo s SYN 192.168.1.1 80
+12.12.12.12     80    -> "nginx/1.18.0"
+12.12.12.12     443   -> "Apache/2.4.41"
 ```
 
 ## 注意事项
 
 1. SYN 扫描需要 root/管理员权限
-2. 扫描结果会保存在 `results` 目录下（使用 `/Save` 选项时）
-3. 扫描结果包含 TXT 和 JSON 两种格式
+2. Windows 系统目前仅支持 TCP 扫描模式
+3. 扫描结果默认保存在当前目录的 Result.txt 文件中
+4. 建议根据网络状况调整线程数和超时时间
 
-## 与原版的区别
+## 构建要求
 
-本实现完全复刻了原版 S 扫描器的功能和使用方式，主要区别在于：
-1. 使用 Go 语言重写，提供更好的跨平台支持
-2. 开源实现，代码结构清晰，易于扩展
-3. 增加了 JSON 格式的结果输出
-4. 优化了内存使用和并发处理
-5. 提供了 Makefile 支持，简化构建和安装过程
+- Go 1.16 或更高版本
+- 支持的操作系统：Linux、macOS、Windows
+
+## 许可证
+
+MIT License
