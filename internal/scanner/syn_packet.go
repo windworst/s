@@ -141,6 +141,9 @@ func (s *Scanner) startSYNScan() {
 
 	// 等待最后的响应
 	time.Sleep(time.Duration(s.config.Timeout) * time.Second)
+	if s.config.SaveResults {
+		s.SaveResults()
+	}
 }
 
 func (s *Scanner) receiveSYNACK(conn *ipv4.RawConn, timeout time.Duration) (*TCPHeader, string, uint16, error) {
