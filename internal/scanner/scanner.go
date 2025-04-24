@@ -45,10 +45,12 @@ func NewScanner(config *Config) (*Scanner, error) {
 		return nil, fmt.Errorf("Invalid Scan Type\n")
 	}
 
-	// 验证IP地址格式
-	if net.ParseIP(config.StartIP) == nil {
+	// 验证起始 IP 或 CIDR 格式
+	if !isValidIPOrCIDR(config.StartIP) {
 		return nil, fmt.Errorf("Invalid Hosts To Scan\n")
 	}
+
+	// 如果有 EndIP，则也检查
 	if config.EndIP != "" && net.ParseIP(config.EndIP) == nil {
 		return nil, fmt.Errorf("Invalid Hosts To Scan\n")
 	}
@@ -58,6 +60,14 @@ func NewScanner(config *Config) (*Scanner, error) {
 		results:  make([]ScanResult, 0),
 		stopChan: make(chan struct{}),
 	}, nil
+}
+
+func isValidIPOrCIDR(input string) bool {
+	if strings.Contains(input, "/") {
+		_, _, err := net.ParseCIDR(input)
+		return err == nil
+	}
+	return net.ParseIP(input) != nil
 }
 
 // Start 开始扫描
