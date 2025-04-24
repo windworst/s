@@ -11,7 +11,7 @@ func (s *Scanner) SaveResults() error {
 	filename := "Result.txt"
 
 	// 创建文件
-	file, err := os.Create(filename)
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create result file: %v", err)
 	}
